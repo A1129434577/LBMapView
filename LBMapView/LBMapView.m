@@ -7,6 +7,7 @@
 
 #import "LBMapView.h"
 @interface LBMapView()<MKMapViewDelegate>
+@property (nonatomic, weak)id<MKMapViewDelegate> realProxy;//真实代理（LBMapView本身作为消息转发虚拟代理）
 @property (nonatomic, strong) MKAnnotationView *fixedAnnotationView;
 @end
 
@@ -38,6 +39,10 @@
 }
 
 #pragma mark setter
+-(void)setDelegate:(id<UITextFieldDelegate>)delegate{
+    self.realProxy = delegate;
+    [super setDelegate:self];
+}
 -(void)setState:(LBMapViewStatus)state{
     _state = state;
     
@@ -52,9 +57,6 @@
     if (annotation) {
         self.state = LBMapViewDidUpdateUserLocation;
         
-        if (self.showsUserLocation) {
-            self.showsUserLocation = NO;
-        }
         if (annotation.image == nil) {
             annotation.image = self.annotationImage;
         }
@@ -122,9 +124,17 @@
         annotation.selected = self.selectUserLocation;
         self.annotation = annotation;
     }
+    
+    if ([self.realProxy respondsToSelector:@selector(mapView:didUpdateUserLocation:)]) {
+        [self.realProxy mapView:mapView didUpdateUserLocation:userLocation];
+    }
 }
 - (void)mapView:(MKMapView *)mapView didFailToLocateUserWithError:(NSError *)error{
     self.state = LBMapViewDidFailToLocateUser;
+    
+    if ([self.realProxy respondsToSelector:@selector(mapView:didFailToLocateUserWithError:)]) {
+        [self.realProxy mapView:mapView didFailToLocateUserWithError:error];
+    }
 }
 
 - (void)mapView:(MKMapView *)mapView regionDidChangeAnimated:(BOOL)animated{
@@ -134,12 +144,20 @@
         [self reverseGeocodeLocation:centerLocation];
         
     }
+    
+    if ([self.realProxy respondsToSelector:@selector(mapView:regionDidChangeAnimated:)]) {
+        [self.realProxy mapView:mapView regionDidChangeAnimated:animated];
+    }
 }
 -(MKAnnotationView *)mapView:(MKMapView *)mapView viewForAnnotation:(LBAnnotation *)annotation
 {
+    if ([self.realProxy respondsToSelector:@selector(mapView:viewForAnnotation:)]) {
+        return [self.realProxy mapView:mapView viewForAnnotation:annotation];
+    }
+    
     NSString *identifier = NSStringFromClass(self.class);
     MKAnnotationView *newAnnotation = [mapView dequeueReusableAnnotationViewWithIdentifier:identifier];
-    if (!newAnnotation) {
+    if (!newAnnotation && [annotation isKindOfClass:LBAnnotation.class]) {
         newAnnotation = [[MKAnnotationView alloc] initWithAnnotation:annotation reuseIdentifier:identifier];
         
         newAnnotation.canShowCallout = annotation.canShowCallout;//显示气泡视图
@@ -148,6 +166,7 @@
     return newAnnotation;
 }
 
+#pragma mark 检索位置
 -(void)reverseGeocodeLocation:(CLLocation *)location{
     //开始检索定位到的地址
     self.state = LBMapViewGeocoding;
@@ -179,7 +198,7 @@
         self.state = LBMapViewGeocoded;
     }];
 }
-#pragma mark - 导航方法
+#pragma mark 导航方法
 +(NSArray<NSDictionary *> *)getInstalledMapApps{
     NSMutableArray *maps = [NSMutableArray array];
     
@@ -222,7 +241,7 @@
     
     return maps;
 }
-#pragma mark Method
+#pragma mark 搜索位置
 + (void)searchLocationWithText:(NSString *)text
                       inRegion:(MKCoordinateRegion)region
                        success:(void (^)(NSArray<LBAnnotation *> * _Nonnull))success
@@ -262,6 +281,14 @@
     }];
 }
 
+#pragma mark 如果本类没实现的代理方法由realProxy实现
+- (id)forwardingTargetForSelector:(SEL)aSelector
+{
+    if (![self respondsToSelector:aSelector] && [self.realProxy respondsToSelector:aSelector]) {
+        return self.realProxy;
+    }
+    return [super forwardingTargetForSelector: aSelector];
+}
 @end
 @implementation LBAnnotation
 @end
